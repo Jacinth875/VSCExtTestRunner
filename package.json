@@ -17,7 +17,25 @@
         "command": "runTest.helloWorld",
         "title": "Hello World"
       }
-    ]
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "testRunner",
+          "title": "Test Runner",
+          "icon": "media/test-runner.svg"
+        }
+      ]
+    },
+    "views": {
+      "testRunner": [
+        {
+          "type": "webview",
+          "id": "testRunner.runView",
+          "name": "Run Command"
+        }
+      ]
+    }
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",
