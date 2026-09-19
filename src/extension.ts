@@ -1,6 +1,7 @@
 // The module 'vscode' contains the VS Code extensibility API
 // Import the module and reference it with the alias vscode in your code below
 import * as vscode from 'vscode';
+import { exec } from 'child_process';
 
 class TestRunnerViewProvider implements vscode.WebviewViewProvider {
 	public static readonly viewType = 'testRunner.runView';
@@ -20,11 +21,58 @@ class TestRunnerViewProvider implements vscode.WebviewViewProvider {
 				if (!text.trim()) {
 					return;
 				}
-				const terminal = vscode.window.activeTerminal ?? vscode.window.createTerminal('Test Runner');
-				terminal.show();
-				terminal.sendText(text, true);
+				const target: string = message.target === 'vscode' ? 'vscode' : 'external';
+				if (target === 'vscode') {
+					this.runInVsCodeTerminal(text);
+				} else {
+					this.runInExternalTerminal(text);
+				}
 			}
 		});
+	}
+
+	private runInVsCodeTerminal(command: string) {
+		const terminal = vscode.window.activeTerminal ?? vscode.window.createTerminal('Test Runner');
+		terminal.show();
+		terminal.sendText(command, true);
+	}
+
+	private runInExternalTerminal(command: string) {
+		const cwd = this.getCurrentCwd();
+
+		if (process.platform === 'win32') {
+			// Opens a new external PowerShell window (command syntax uses $env:), cd's to the same path, then runs the command.
+			const escapedCwd = cwd.replace(/'/g, "''");
+			const escapedCommand = command.replace(/"/g, '\\"');
+			const psCommand = `Set-Location -LiteralPath '${escapedCwd}'; ${escapedCommand}`;
+			const encodedPsCommand = psCommand.replace(/"/g, '\\"');
+			// The empty "" title argument prevents `start` from swallowing the real command as its window title.
+			const fullCommand = `start "" powershell.exe -NoExit -Command "${encodedPsCommand}"`;
+			exec(fullCommand, { cwd });
+		} else if (process.platform === 'darwin') {
+			const escapedCommand = command.replace(/"/g, '\\"');
+			const script = `tell application "Terminal" to do script "cd \\"${cwd}\\" && ${escapedCommand}"`;
+			exec(`osascript -e '${script}'`, { cwd });
+		} else {
+			// Linux: try a common terminal emulator.
+			const escapedCommand = command.replace(/"/g, '\\"');
+			exec(`x-terminal-emulator -e bash -c "cd \\"${cwd}\\" && ${escapedCommand}; exec bash"`, { cwd });
+		}
+	}
+
+	private getCurrentCwd(): string {
+		const activeTerminal = vscode.window.activeTerminal;
+		const shellIntegrationCwd = (activeTerminal?.shellIntegration as { cwd?: vscode.Uri })?.cwd;
+		if (shellIntegrationCwd?.fsPath) {
+			return shellIntegrationCwd.fsPath;
+		}
+
+		const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+		if (workspaceFolder) {
+			return workspaceFolder.uri.fsPath;
+		}
+
+		return process.cwd();
 	}
 
 	private getHtml(webview: vscode.Webview): string {
@@ -79,6 +127,23 @@ class TestRunnerViewProvider implements vscode.WebviewViewProvider {
 		#run:hover {
 			background: var(--vscode-button-hoverBackground);
 		}
+		.checkbox-row {
+			display: flex;
+			align-items: center;
+			gap: 6px;
+			margin-bottom: 6px;
+		}
+		.checkbox-row input[type="checkbox"] {
+			width: auto;
+			margin: 0;
+		}
+		.checkbox-row label {
+			display: inline;
+			margin-bottom: 0;
+			font-size: 13px;
+			opacity: 1;
+			cursor: pointer;
+		}
 	</style>
 </head>
 <body>
@@ -98,6 +163,15 @@ class TestRunnerViewProvider implements vscode.WebviewViewProvider {
 			${runnerOptions}
 	</select>
 
+	<div class="checkbox-row">
+		<input type="checkbox" id="externalTerminal" checked />
+		<label for="externalTerminal">External terminal</label>
+	</div>
+	<div class="checkbox-row">
+		<input type="checkbox" id="vscodeTerminal" />
+		<label for="vscodeTerminal">VSC terminal</label>
+	</div>
+
 	<button id="run">Run</button>
 	<script nonce="${nonce}">
 		const vscode = acquireVsCodeApi();
@@ -105,7 +179,25 @@ class TestRunnerViewProvider implements vscode.WebviewViewProvider {
 		const runnerSelect = document.getElementById('runner');
 		const consumerBrandInput = document.getElementById('consumerBrand');
 		const partnerBrandInput = document.getElementById('partnerBrand');
+		const externalTerminalCheckbox = document.getElementById('externalTerminal');
+		const vscodeTerminalCheckbox = document.getElementById('vscodeTerminal');
 		const button = document.getElementById('run');
+
+		externalTerminalCheckbox.addEventListener('change', () => {
+			if (externalTerminalCheckbox.checked) {
+				vscodeTerminalCheckbox.checked = false;
+			} else {
+				vscodeTerminalCheckbox.checked = true;
+			}
+		});
+
+		vscodeTerminalCheckbox.addEventListener('change', () => {
+			if (vscodeTerminalCheckbox.checked) {
+				externalTerminalCheckbox.checked = false;
+			} else {
+				externalTerminalCheckbox.checked = true;
+			}
+		});
 
 		function normalizeBrands(value) {
 			return value
@@ -120,6 +212,7 @@ class TestRunnerViewProvider implements vscode.WebviewViewProvider {
 			const runner = runnerSelect.value;
 			const consumerBrand = normalizeBrands(consumerBrandInput.value);
 			const partnerBrand = normalizeBrands(partnerBrandInput.value);
+			const target = vscodeTerminalCheckbox.checked ? 'vscode' : 'external';
 
 			let command = '$env:env="' + env + '";';
 			if (consumerBrand) {
@@ -130,7 +223,7 @@ class TestRunnerViewProvider implements vscode.WebviewViewProvider {
 			}
 			command += ' npm run ' + runner;
 
-			vscode.postMessage({ command: 'run', text: command });
+			vscode.postMessage({ command: 'run', text: command, target: target });
 		}
 
 		button.addEventListener('click', runCommand);
