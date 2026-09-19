@@ -29,6 +29,20 @@ class TestRunnerViewProvider implements vscode.WebviewViewProvider {
 
 	private getHtml(webview: vscode.Webview): string {
 		const nonce = getNonce();
+		const environments = ['online1', 'online2', 'online3', 'online4', 'online5', 'onlineqa', 'onlinesup'];
+		const testRunners = [
+			'consumerRegression',
+			'partnerRegression',
+			'UDARegression',
+			'wdmSmoke',
+			'wdmSmoke:randomBrand',
+			'regression:randomBrand',
+			'email-regression-wdm-ui',
+			'email-smoke-wdm-ui'
+		];
+		const envOptions = environments.map(e => `<option value="${e}">${e}</option>`).join('\n\t\t\t');
+		const runnerOptions = testRunners.map(r => `<option value="${r}">${r}</option>`).join('\n\t\t\t');
+
 		return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -39,11 +53,17 @@ class TestRunnerViewProvider implements vscode.WebviewViewProvider {
 			font-family: var(--vscode-font-family);
 			padding: 8px;
 		}
-		#input {
+		label {
+			display: block;
+			margin-bottom: 4px;
+			font-size: 12px;
+			opacity: 0.8;
+		}
+		select, input {
 			width: 100%;
 			box-sizing: border-box;
 			padding: 4px;
-			margin-bottom: 8px;
+			margin-bottom: 10px;
 			background: var(--vscode-input-background);
 			color: var(--vscode-input-foreground);
 			border: 1px solid var(--vscode-input-border, transparent);
@@ -62,23 +82,58 @@ class TestRunnerViewProvider implements vscode.WebviewViewProvider {
 	</style>
 </head>
 <body>
-	<input id="input" type="text" placeholder="Enter command..." />
+	<label for="env">Environment</label>
+	<select id="env">
+			${envOptions}
+	</select>
+
+	<label for="consumerBrand">Consumer Brand Name</label>
+	<input id="consumerBrand" type="text" placeholder="e.g. aami,apia" />
+
+	<label for="partnerBrand">Partner Brand Name</label>
+	<input id="partnerBrand" type="text" placeholder="e.g. extranet,vsl" />
+
+	<label for="runner">Test Runner</label>
+	<select id="runner">
+			${runnerOptions}
+	</select>
+
 	<button id="run">Run</button>
 	<script nonce="${nonce}">
 		const vscode = acquireVsCodeApi();
-		const input = document.getElementById('input');
+		const envSelect = document.getElementById('env');
+		const runnerSelect = document.getElementById('runner');
+		const consumerBrandInput = document.getElementById('consumerBrand');
+		const partnerBrandInput = document.getElementById('partnerBrand');
 		const button = document.getElementById('run');
 
+		function normalizeBrands(value) {
+			return value
+				.split(',')
+				.map(function (b) { return b.trim(); })
+				.filter(function (b) { return b.length > 0; })
+				.join(',');
+		}
+
 		function runCommand() {
-			vscode.postMessage({ command: 'run', text: input.value });
+			const env = envSelect.value;
+			const runner = runnerSelect.value;
+			const consumerBrand = normalizeBrands(consumerBrandInput.value);
+			const partnerBrand = normalizeBrands(partnerBrandInput.value);
+
+			let command = '$env:env="' + env + '";';
+			if (consumerBrand) {
+				command += ' $env:BRAND_OVERRIDE="' + consumerBrand + '";';
+			}
+			if (partnerBrand) {
+				command += ' $env:PARTNER_OVERRIDE="' + partnerBrand + '";';
+			}
+			command += ' npm run ' + runner;
+
+			vscode.postMessage({ command: 'run', text: command });
 		}
 
 		button.addEventListener('click', runCommand);
-		input.addEventListener('keydown', (e) => {
-			if (e.key === 'Enter') {
-				runCommand();
-			}
-		});
 	</script>
 </body>
 </html>`;
@@ -100,7 +155,7 @@ export function activate(context: vscode.ExtensionContext) {
 
 	// Use the console to output diagnostic information (console.log) and errors (console.error)
 	// This line of code will only be executed once when your extension is activated
-	console.log('Congratulations, your extension "runTest" is now active!');
+	console.log('Extension "runTest" is now active!');
 
 	// The command has been defined in the package.json file
 	// Now provide the implementation of the command with registerCommand
