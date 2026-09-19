@@ -163,13 +163,16 @@ class TestRunnerViewProvider implements vscode.WebviewViewProvider {
 			${runnerOptions}
 	</select>
 
+	<label for="tagName">Tag Name</label>
+	<input id="tagName" type="text" placeholder="e.g. DI-8662,DI-8656" />
+
 	<div class="checkbox-row">
 		<input type="checkbox" id="externalTerminal" checked />
-		<label for="externalTerminal">External terminal</label>
+		<label for="externalTerminal">External terminal output</label>
 	</div>
 	<div class="checkbox-row">
 		<input type="checkbox" id="vscodeTerminal" />
-		<label for="vscodeTerminal">VSC terminal</label>
+		<label for="vscodeTerminal">VSC terminal output</label>
 	</div>
 
 	<button id="run">Run</button>
@@ -179,6 +182,7 @@ class TestRunnerViewProvider implements vscode.WebviewViewProvider {
 		const runnerSelect = document.getElementById('runner');
 		const consumerBrandInput = document.getElementById('consumerBrand');
 		const partnerBrandInput = document.getElementById('partnerBrand');
+		const tagNameInput = document.getElementById('tagName');
 		const externalTerminalCheckbox = document.getElementById('externalTerminal');
 		const vscodeTerminalCheckbox = document.getElementById('vscodeTerminal');
 		const button = document.getElementById('run');
@@ -207,11 +211,21 @@ class TestRunnerViewProvider implements vscode.WebviewViewProvider {
 				.join(',');
 		}
 
+		function normalizeTags(value) {
+			return value
+				.split(',')
+				.map(function (t) { return t.trim(); })
+				.filter(function (t) { return t.length > 0; })
+				.map(function (t) { return t.startsWith('@') ? t : '@' + t; })
+				.join('|');
+		}
+
 		function runCommand() {
 			const env = envSelect.value;
 			const runner = runnerSelect.value;
 			const consumerBrand = normalizeBrands(consumerBrandInput.value);
 			const partnerBrand = normalizeBrands(partnerBrandInput.value);
+			const tags = normalizeTags(tagNameInput.value);
 			const target = vscodeTerminalCheckbox.checked ? 'vscode' : 'external';
 
 			let command = '$env:env="' + env + '";';
@@ -221,7 +235,12 @@ class TestRunnerViewProvider implements vscode.WebviewViewProvider {
 			if (partnerBrand) {
 				command += ' $env:PARTNER_OVERRIDE="' + partnerBrand + '";';
 			}
-			command += ' npm run ' + runner;
+
+			if (tags) {
+				command += ' npx playwright test -grep "' + tags + '"';
+			} else {
+				command += ' npm run ' + runner;
+			}
 
 			vscode.postMessage({ command: 'run', text: command, target: target });
 		}
