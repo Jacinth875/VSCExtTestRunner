@@ -2,6 +2,9 @@
 // Import the module and reference it with the alias vscode in your code below
 import * as vscode from 'vscode';
 import { exec } from 'child_process';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 
 class TestRunnerViewProvider implements vscode.WebviewViewProvider {
 	public static readonly viewType = 'testRunner.runView';
@@ -41,14 +44,7 @@ class TestRunnerViewProvider implements vscode.WebviewViewProvider {
 		const cwd = this.getCurrentCwd();
 
 		if (process.platform === 'win32') {
-			// Opens a new external PowerShell window (command syntax uses $env:), cd's to the same path, then runs the command.
-			const escapedCwd = cwd.replace(/'/g, "''");
-			const escapedCommand = command.replace(/"/g, '\\"');
-			const psCommand = `Set-Location -LiteralPath '${escapedCwd}'; ${escapedCommand}`;
-			const encodedPsCommand = psCommand.replace(/"/g, '\\"');
-			// The empty "" title argument prevents `start` from swallowing the real command as its window title.
-			const fullCommand = `start "" powershell.exe -NoExit -Command "${encodedPsCommand}"`;
-			exec(fullCommand, { cwd });
+			this.runInExternalTerminalWindows(command, cwd);
 		} else if (process.platform === 'darwin') {
 			const escapedCommand = command.replace(/"/g, '\\"');
 			const script = `tell application "Terminal" to do script "cd \\"${cwd}\\" && ${escapedCommand}"`;
@@ -58,6 +54,65 @@ class TestRunnerViewProvider implements vscode.WebviewViewProvider {
 			const escapedCommand = command.replace(/"/g, '\\"');
 			exec(`x-terminal-emulator -e bash -c "cd \\"${cwd}\\" && ${escapedCommand}; exec bash"`, { cwd });
 		}
+	}
+
+	/**
+	 * Opens a brand-new external PowerShell window at `cwd`, waits for it to be ready,
+	 * activates it, then pastes the command via the clipboard (SendKeys Ctrl+V) and
+	 * presses Enter. Using the clipboard instead of typed SendKeys avoids issues with
+	 * special characters (quotes, $, etc.) being mis-sent as keystrokes.
+	 */
+	private runInExternalTerminalWindows(command: string, cwd: string) {
+		// Single-quoted PowerShell strings only need '' to escape a literal single quote.
+		const psSingleQuote = (value: string) => value.replace(/'/g, "''");
+		const escapedCwd = psSingleQuote(cwd);
+		const escapedCommand = psSingleQuote(command);
+
+		const driverScript = `
+$ErrorActionPreference = 'Stop'
+$startArgs = @('-NoExit', '-Command', "Set-Location -LiteralPath '${escapedCwd}'")
+$proc = Start-Process -FilePath 'powershell.exe' -ArgumentList $startArgs -PassThru
+
+# Give the new window time to open before we try to activate/type into it.
+Start-Sleep -Milliseconds 800
+
+Add-Type -AssemblyName Microsoft.VisualBasic
+Add-Type -AssemblyName System.Windows.Forms
+
+[Microsoft.VisualBasic.Interaction]::AppActivate($proc.Id)
+Start-Sleep -Milliseconds 300
+
+$originalClipboard = $null
+try { $originalClipboard = Get-Clipboard -Raw -ErrorAction Stop } catch {}
+
+Set-Clipboard -Value '${escapedCommand}'
+Start-Sleep -Milliseconds 200
+[System.Windows.Forms.SendKeys]::SendWait('^v')
+Start-Sleep -Milliseconds 500
+[System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
+Start-Sleep -Milliseconds 200
+
+if ($null -ne $originalClipboard) {
+	Set-Clipboard -Value $originalClipboard
+} else {
+	Set-Clipboard -Value ''
+}
+`;
+
+		const driverPath = path.join(os.tmpdir(), `testrunner-driver-${Date.now()}.ps1`);
+		fs.writeFileSync(driverPath, driverScript, { encoding: 'utf8' });
+
+		exec(
+			`powershell.exe -NoProfile -ExecutionPolicy Bypass -File "${driverPath}"`,
+			{ cwd },
+			(error) => {
+				// Clean up the temporary driver script regardless of success/failure.
+				fs.unlink(driverPath, () => {});
+				if (error) {
+					vscode.window.showErrorMessage(`Test Runner: failed to run command in external terminal: ${error.message}`);
+				}
+			}
+		);
 	}
 
 	private getCurrentCwd(): string {
