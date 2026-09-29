@@ -242,12 +242,56 @@ if ($null -ne $originalClipboard) {
 		const vscodeTerminalCheckbox = document.getElementById('vscodeTerminal');
 		const button = document.getElementById('run');
 
+		function saveState() {
+			vscode.setState({
+				env: envSelect.value,
+				runner: runnerSelect.value,
+				consumerBrand: consumerBrandInput.value,
+				partnerBrand: partnerBrandInput.value,
+				tagName: tagNameInput.value,
+				externalTerminal: externalTerminalCheckbox.checked,
+				vscodeTerminal: vscodeTerminalCheckbox.checked
+			});
+		}
+
+		function restoreState() {
+			const state = vscode.getState();
+
+			if (!state) {
+				return;
+			}
+
+			if (state.env !== undefined) { envSelect.value = state.env; }
+			if (state.runner !== undefined) { runnerSelect.value = state.runner; }
+			if (state.consumerBrand !== undefined) { consumerBrandInput.value = state.consumerBrand; }
+			if (state.partnerBrand !== undefined) { partnerBrandInput.value = state.partnerBrand; }
+			if (state.tagName !== undefined) { tagNameInput.value = state.tagName; }
+			if (state.externalTerminal !== undefined) { externalTerminalCheckbox.checked = state.externalTerminal; }
+			if (state.vscodeTerminal !== undefined) { vscodeTerminalCheckbox.checked = state.vscodeTerminal; }
+		}
+
+		restoreState();
+
+		[
+			envSelect,
+			runnerSelect,
+			consumerBrandInput,
+			partnerBrandInput,
+			tagNameInput,
+			externalTerminalCheckbox,
+			vscodeTerminalCheckbox
+		].forEach(function (el) {
+			el.addEventListener('input', saveState);
+			el.addEventListener('change', saveState);
+		});
+
 		externalTerminalCheckbox.addEventListener('change', () => {
 			if (externalTerminalCheckbox.checked) {
 				vscodeTerminalCheckbox.checked = false;
 			} else {
 				vscodeTerminalCheckbox.checked = true;
 			}
+			saveState();
 		});
 
 		vscodeTerminalCheckbox.addEventListener('change', () => {
@@ -256,6 +300,7 @@ if ($null -ne $originalClipboard) {
 			} else {
 				externalTerminalCheckbox.checked = true;
 			}
+			saveState();
 		});
 
 		function normalizeBrands(value) {
